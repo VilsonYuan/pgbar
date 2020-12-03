@@ -12,7 +12,7 @@ type Bar struct {
 	prefix   string
 	total    int
 	width    int
-	advance  chan bool
+	advance  chan string
 	done     chan bool
 	currents map[string]int
 	current  int
@@ -23,6 +23,8 @@ type Bar struct {
 	estimate int
 	fast     int
 	slow     int
+	msg      string
+	color    string
 }
 
 var (
@@ -59,7 +61,7 @@ func NewBar(line int, prefix string, total int) *Bar {
 		fast:     defaultFast,
 		slow:     defaultSlow,
 		width:    100,
-		advance:  make(chan bool),
+		advance:  make(chan string),
 		done:     make(chan bool),
 		currents: make(map[string]int),
 	}
@@ -79,24 +81,26 @@ func (b *Bar) SetSpeedSection(fast, slow int) {
 	}
 }
 
-func (b *Bar) Add(n ...int) {
+func (b *Bar) Add(msg string, color string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	step := 1
-	if len(n) > 0 {
-		step = n[0]
-	}
-
-	b.current += step
+	b.current++
 
 	lastRate := b.rate
 	lastSpeed := b.speed
 
 	b.count()
 
+	msgLen := len(msg)
+	for i:=msgLen;i<=21;i++{
+		msg = fmt.Sprintf("%s ", msg)
+	}
+
 	if lastRate != b.rate || lastSpeed != b.speed {
-		b.advance <- true
+		b.color = color
+		b.msg = msg
+		b.advance <- msg
 	}
 
 	if b.rate >= 100 {
@@ -137,7 +141,7 @@ func (b *Bar) updateCost() {
 			b.mu.Lock()
 			b.count()
 			b.mu.Unlock()
-			b.advance <- true
+			b.advance <- b.msg
 		case <-b.done:
 			return
 		}
@@ -145,12 +149,12 @@ func (b *Bar) updateCost() {
 }
 
 func (b *Bar) run() {
-	for range b.advance {
-		printf(b.line, "\r%s", b.barMsg())
+	for msg := range b.advance {
+		printf(b.line, "\r%s", b.barMsg(msg))
 	}
 }
 
-func (b *Bar) barMsg() string {
+func (b *Bar) barMsg(message string) string {
 	prefix := fmt.Sprintf("%s", b.prefix)
 	rate := fmt.Sprintf("%3d%%", b.rate)
 	speed := fmt.Sprintf("%3.2fps", 0.01*float64(b.speed))
@@ -167,12 +171,20 @@ func (b *Bar) barMsg() string {
 		realBar2 = ">" + bar2[:bar2Len-1]
 	}
 
-	msg := fmt.Sprintf(`%s %s%s [%s%s] %s %s in: %s`, prefix, rate, ct, realBar1, realBar2, speed, cost, estimate)
-	switch {
-	case b.speed <= b.slow*100:
+	//msg := fmt.Sprintf(`%s %s%s [%s%s] %s %s in: %s`, prefix, rate, ct, realBar1, realBar2, speed, cost, estimate)
+	msg := fmt.Sprintf(`%s %s%s [%s%s] %s: %s`, prefix, rate, ct, realBar1, realBar2, message, estimate)
+	//switch {
+	//case b.speed <= b.slow*100:
+	//	return "\033[0;31m" + msg + "\033[0m"
+	//case b.speed > b.slow*100 && b.speed < b.fast*100:
+	//	return "\033[0;33m" + msg + "\033[0m"
+	//default:
+	//	return "\033[0;32m" + msg + "\033[0m"
+	//}
+
+	switch b.color {
+	case "red":
 		return "\033[0;31m" + msg + "\033[0m"
-	case b.speed > b.slow*100 && b.speed < b.fast*100:
-		return "\033[0;33m" + msg + "\033[0m"
 	default:
 		return "\033[0;32m" + msg + "\033[0m"
 	}
@@ -186,3 +198,4 @@ func (b *Bar) timeFmt(cost int) string {
 
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
+
